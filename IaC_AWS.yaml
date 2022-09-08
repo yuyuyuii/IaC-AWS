@@ -1,0 +1,137 @@
+# ざっくりの流れ
+# キーペアを新規作成
+# VPCを作る
+# VPCの出入り口としてIGWを作る
+# VPCに出入り口がないのでIGWを割り当てる
+# VPCの中にサーバを配置するためにpublicなsubnetグループを作成する。
+# ルータの役割をするルーティングテーブルを作成
+# ルーティングテーブルの設定
+# ルーティングテーブルをVPC, subnetに割り当て
+# セキュリティグループの作成
+# EC２インスタンス作成
+# cloudfomationでファイルアップロードして実行
+
+AWSTemplateFormatVersion: "2010-09-09"
+Description: IaC-practice
+Parameters: 
+
+  # 依存のキーペアを使用する場合はコメントを外す。GUIでキーペアを選択する
+  # KeyName:
+  #   Description: The EC2 Key Pair to allow SSH access to the instance
+  #   Type: "AWS::EC2::KeyPair::KeyName"
+
+  # EC2用のセキュリティグループで自分のIPからの接続しか許可しない。GUIで入力する。
+  # xxx.xxx.xxx.xxx/32
+  MyIp:
+    Description: IP address allowed to access EC2
+    Type: String
+
+Resources: 
+# 既存のキーペアを使用しないため、新規に作成し、新規作成したものを使用する
+  IaCKeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName: IaCKeyPair
+
+# VPCを作成
+  IacVPC: # このyamlファイルでのVPCの名前
+    Type: AWS::EC2::VPC # VPCを作るよ
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      Tags:
+        - Key: Name
+          Value: Iac-VPC # この名前でVPCを作るよ
+
+# IGWを作成
+  IacIGW: # このyamlファイルでのIGWの名前
+    Type: AWS::EC2::InternetGateway # IGWを作るよ
+    Properties: 
+      Tags:
+        - Key: Name
+          Value: Iac-IGW # 作成するIGWの名前
+
+# IGWをVPCに割り当て
+  AttachGateway:
+    Type: AWS::EC2::VPCGatewayAttachment # IGWをVPCにアタッチ
+    Properties:
+      VpcId: !Ref IacVPC # IacVPCを割り当て
+      InternetGatewayId: !Ref IacIGW # IacIGWを割り当て
+
+# EC2のpublicsubnet作成し、VPCに割り当て
+  IacPublicSubnetEC2:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1a # アベイラビリティゾーンを指定
+      VpcId: !Ref IacVPC # VPCを割り当て
+      CidrBlock: 10.0.1.0/24 # publicなsubnetのセグメント
+      Tags:
+        - Key: Name
+          Value: Iac-pub-subnet-EC2
+
+# ルートテーブルを作成し、VPCに割り当て
+  IacRouteTableEC2:
+    Type: AWS::EC2::RouteTable
+    DependsOn: AttachGateway
+    Properties:
+      VpcId: !Ref IacVPC # VPCを割り当て
+      Tags:
+        - Key: Name
+          Value: Iac-RouteTable-EC2
+
+# ルーティングテーブルの設定
+  IacRouteEC2:
+    Type: AWS::EC2::Route
+    Properties:
+      RouteTableId: !Ref IacRouteTableEC2 # ルートテーブルを割り当て
+      DestinationCidrBlock: 0.0.0.0/0 # 通信を許可するセグメント
+      GatewayId: !Ref IacIGW
+
+# ルートテーブルをサブネットに関連付け
+  IacSubnetRouteTableAsso:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref  IacPublicSubnetEC2
+      RouteTableId: !Ref IacRouteTableEC2
+
+
+# EC2のセキュリティグループ作成
+  IacSecurityGroupEC2:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: Iac-SecurityGroup-EC2
+      GroupDescription: Iac-SecurityGroup-EC2
+      VpcId: !Ref IacVPC
+      SecurityGroupIngress: # 通信を許可するプロトコル, セグメント
+        # ssh
+        - IpProtocol: tcp
+          CidrIp: !Ref MyIp # 自分のIPのみ許可
+          FromPort: "22"
+          ToPort: "22"
+        # http
+        - IpProtocol: tcp
+          CidrIp: !Ref MyIp
+          FromPort: 80
+          ToPort: 80
+
+# EC2インスタンス作成
+  IacEC2:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-0f36dcfcc94112ea1 # AWSの既存のイメージを指定
+      KeyName: !Ref IaCKeyPair
+      InstanceType: t2.micro
+      NetworkInterfaces: 
+        - AssociatePublicIpAddress: "true"
+          DeviceIndex: "0"
+          SubnetId: !Ref IacPublicSubnetEC2
+          GroupSet:
+            - !Ref IacSecurityGroupEC2
+      # サーバを立てたら実行するコマンド
+      UserData: !Base64 |
+        #!/bin/bash
+        sudo yum update -y
+        sudo yum install -y git vim
+        sudo useradd -m my
+      Tags:
+          - Key: Name
+            Value: Iac-EC2
