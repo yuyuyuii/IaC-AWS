@@ -189,8 +189,39 @@ Resources:
       UserData: !Base64 |
         #!/bin/bash
         sudo yum update -y
-        sudo yum install -y git vim
+        sudo yum install -y git vim mysql
         sudo useradd -m my
       Tags:
           - Key: Name
             Value: Iac-EC2
+
+  IacRDSSubnetGroup: 
+    Type: AWS::RDS::DBSubnetGroup
+    Properties: 
+      DBSubnetGroupDescription: subnet group for db
+      SubnetIds: 
+        - !Ref IaCPrivateSubnetRDS01
+        - !Ref IaCPrivateSubnetRDS02
+      # Tags:
+      #   - Key: "CfnStackName"
+      #     Value: !Ref AWS::StackName 
+
+# RDSのインスタンス作成
+  IacRDS:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete # スタックを削除したらバックアップとしてリソースを保存するが今回は削除する
+    Properties:
+      Engine: MySQL # mysqlを使用する
+      MasterUsername: iacdb # データベースのユーザ名
+      MasterUserPassword: O571o571 #/ !Sub '{{resolve:secretsmanager:${ServiceName}${EnvSuffix}-database-password:SecretString}}'
+      DBName: iacDB #/!Join [ '', [ !Ref DatabaseName, !Ref DatabaseEnvSuffix ] ]
+      DBInstanceIdentifier: IacRDS #/!Sub ${ServiceName}${EnvSuffix}-instance-1 # AWS上のRDSの名前
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20 # 初期ストレージの大きさ。最小の20にする
+      DBSubnetGroupName: !Ref IacRDSSubnetGroup
+      VPCSecurityGroups: 
+        - !Ref IacSecurityGroupRDS
+      BackupRetentionPeriod: 0 # 自動バックアップを無効するため0にする
+      # Tags:
+      #   - Key: "CfnStackName"
+      #     Value: !Ref AWS::StackName
