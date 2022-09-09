@@ -41,6 +41,7 @@ Resources:
       Tags:
         - Key: Name
           Value: Iac-VPC # この名前でVPCを作るよ
+          # Value: !Ref AWS::StackName # Cloudfomationのスタック名になる
 
 # IGWを作成
   IacIGW: # このyamlファイルでのIGWの名前
@@ -68,7 +69,28 @@ Resources:
         - Key: Name
           Value: Iac-pub-subnet-EC2
 
-# ルートテーブルを作成し、VPCに割り当て
+# RDS用のprivate subnetを作成
+  IaCPrivateSubnetRDS01:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1a
+      VpcId: !Ref IacVPC
+      CidrBlock: 10.0.10.0/24
+      Tags:
+        - Key: Name
+          Value: Iac-pri-subnet-RDS-01
+
+  IaCPrivateSubnetRDS02:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1c
+      VpcId: !Ref IacVPC
+      CidrBlock: 10.0.11.0/24
+      Tags:
+        - Key: Name
+          Value: Iac-pri-subnet-RDS-02
+
+# public subnetのルートテーブルを作成し、VPCに割り当て
   IacRouteTableEC2:
     Type: AWS::EC2::RouteTable
     DependsOn: AttachGateway
@@ -78,21 +100,44 @@ Resources:
         - Key: Name
           Value: Iac-RouteTable-EC2
 
+# private subnetのルートテーブルを作成し、VPCに割り当て
+  IacRouteTableRDS:
+    Type: AWS::EC2::RouteTable
+    DependsOn: AttachGateway
+    Properties:
+      VpcId: !Ref IacVPC # VPCを割り当て
+      Tags:
+        - Key: Name
+          Value: Iac-RouteTable-RDS
+
 # ルーティングテーブルの設定
   IacRouteEC2:
     Type: AWS::EC2::Route
     Properties:
       RouteTableId: !Ref IacRouteTableEC2 # ルートテーブルを割り当て
-      DestinationCidrBlock: 0.0.0.0/0 # 通信を許可するセグメント
+      DestinationCidrBlock: 0.0.0.0/0 # 0.0.0.0/0宛ての通信はIaCGWにルーティング
       GatewayId: !Ref IacIGW
 
-# ルートテーブルをサブネットに関連付け
-  IacSubnetRouteTableAsso:
+# public subnetにルートテーブルをサブネットに関連付け
+  IacPublicSubnetRouteTableAsso:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref  IacPublicSubnetEC2
       RouteTableId: !Ref IacRouteTableEC2
 
+# private subnetをルートテーブルをサブネットに関連付け
+  IacPrivateSubnet01RouteTableAsso:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref  IaCPrivateSubnetRDS01
+      RouteTableId: !Ref IacRouteTableRDS
+
+# private subnetをルートテーブルをサブネットに関連付け。
+  IacPrivateSubnet02RouteTableAsso:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref  IaCPrivateSubnetRDS02
+      RouteTableId: !Ref IacRouteTableRDS
 
 # EC2のセキュリティグループ作成
   IacSecurityGroupEC2:
@@ -112,6 +157,20 @@ Resources:
           CidrIp: !Ref MyIp
           FromPort: 80
           ToPort: 80
+
+# RDAのセキュリティグループ作成
+  IacSecurityGroupRDS:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: Iac-SecurityGroup-RDS
+      GroupDescription: Iac-SecurityGroup-RDS
+      VpcId: !Ref IacVPC
+      SecurityGroupIngress: # 通信を許可するプロトコル, セグメント
+        # mysqlのポートのみ許可
+        - IpProtocol: tcp
+          SourceSecurityGroupId: !Ref IacSecurityGroupEC2
+          FromPort: "3306"
+          ToPort: "3306"
 
 # EC2インスタンス作成
   IacEC2:
