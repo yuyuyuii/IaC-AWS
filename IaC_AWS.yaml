@@ -11,54 +11,124 @@
 # EC２インスタンス作成
 # cloudfomationでファイルアップロードして実行
 
+# /todo
+  # - GUIで入力しているところをこのファイルに定義する
+  # - キーペアも既存のものを使うように変更する 
+    #  - キーペア作成 → Iac.cer
+  # - RDSのユーザ名とかパスワードとかを直で入力しないように変更。使いまわせるように別の場所に定義する
+  # - 構成図とか書いてみるか
+
+
 AWSTemplateFormatVersion: "2010-09-09"
 Description: IaC-practice
+
+# --------------------------------------------- #
+# 設定定義
+# --------------------------------------------- #
 Parameters: 
 
   # 依存のキーペアを使用する場合はコメントを外す。GUIでキーペアを選択する
-  # KeyName:
-  #   Description: The EC2 Key Pair to allow SSH access to the instance
-  #   Type: "AWS::EC2::KeyPair::KeyName"
+  IaCKeyPair:
+    Description: The EC2 Key Pair to allow SSH access to the instance
+    Type: "AWS::EC2::KeyPair::KeyName"
 
   # EC2用のセキュリティグループで自分のIPからの接続しか許可しない。GUIで入力する。
   # xxx.xxx.xxx.xxx/32
   MyIp:
     Description: IP address allowed to access EC2
     Type: String
+    Default: 118.0.75.9/32
 
+  PrefixName:
+      Type: String
+      Default: Iac
+
+# --------------------------------------------- #
+# RDSの設定定義
+# --------------------------------------------- #
+  DatabaseName:
+    Type: String
+    Default: mixapp
+  
+  InstanceTypeForDb:
+    Type: String
+    Default: db.t3.micro # 一番小さいサイズ
+
+  DBMasterUserName:
+    Type: String
+    Default: mixappuser
+    NoEcho: true
+    MinLength: 1
+    MaxLength: 16
+    AllowedPattern: "[a-zA-Z][a-zA-Z0-9]*"
+    ConstraintDescription: "must begin with a letter and contain only alphanumeric characters."
+
+  DBPassword: 
+    Default: "mixappuser01" # とりあえず固定値
+    NoEcho: true
+    Type: String
+    MinLength: 8
+    MaxLength: 41
+    AllowedPattern: "[a-zA-Z0-9]*"
+    ConstraintDescription: "must contain only alphanumeric characters."
+
+  DBInstanceStorageSize:
+    Type: String
+    Default: "20"
+
+  # 自動バックアップの有効/無効
+  BackupRetentionPeriod:
+    Type: String
+    Default: 0 # 0を入力すると無効、1を入力すると有効
+
+
+# --------------------------------------------- #
+# 作成
+# --------------------------------------------- #
 Resources: 
 # 既存のキーペアを使用しないため、新規に作成し、新規作成したものを使用する
-  IaCKeyPair:
-    Type: AWS::EC2::KeyPair
-    Properties:
-      KeyName: IaCKeyPair
+  # IaCKeyPair:
+  #   Type: AWS::EC2::KeyPair
+  #   Properties:
+  #     KeyName: IaCKeyPair
 
-# VPCを作成
+# --------------------------------------------- #
+# VPC作成
+# --------------------------------------------- #
   IacVPC: # このyamlファイルでのVPCの名前
     Type: AWS::EC2::VPC # VPCを作るよ
     Properties:
       CidrBlock: 10.0.0.0/16
       Tags:
         - Key: Name
-          Value: Iac-VPC # この名前でVPCを作るよ
+          Value: !Sub ${PrefixName}-VPC # この名前でVPCを作るよ
           # Value: !Ref AWS::StackName # Cloudfomationのスタック名になる
 
-# IGWを作成
+# --------------------------------------------- #
+# IGW作成
+# --------------------------------------------- #
   IacIGW: # このyamlファイルでのIGWの名前
     Type: AWS::EC2::InternetGateway # IGWを作るよ
     Properties: 
       Tags:
         - Key: Name
-          Value: Iac-IGW # 作成するIGWの名前
+          Value: !Sub ${PrefixName}-IGW # 作成するIGWの名前
 
+# --------------------------------------------- #
 # IGWをVPCに割り当て
+# --------------------------------------------- #
   AttachGateway:
     Type: AWS::EC2::VPCGatewayAttachment # IGWをVPCにアタッチ
     Properties:
       VpcId: !Ref IacVPC # IacVPCを割り当て
       InternetGatewayId: !Ref IacIGW # IacIGWを割り当て
 
-# EC2のpublicsubnet作成し、VPCに割り当て
+
+############## EC2関連で使用するもの定義 ##############
+
+# --------------------------------------------- #
+# publicsubnet作成し、VPCに割り当て
+# --------------------------------------------- #
   IacPublicSubnetEC2:
     Type: AWS::EC2::Subnet
     Properties:
@@ -67,30 +137,12 @@ Resources:
       CidrBlock: 10.0.1.0/24 # publicなsubnetのセグメント
       Tags:
         - Key: Name
-          Value: Iac-pub-subnet-EC2
+          Value: !Sub ${PrefixName}-pub-subnet-EC2
 
-# RDS用のprivate subnetを作成
-  IaCPrivateSubnetRDS01:
-    Type: AWS::EC2::Subnet
-    Properties:
-      AvailabilityZone: ap-northeast-1a
-      VpcId: !Ref IacVPC
-      CidrBlock: 10.0.10.0/24
-      Tags:
-        - Key: Name
-          Value: Iac-pri-subnet-RDS-01
 
-  IaCPrivateSubnetRDS02:
-    Type: AWS::EC2::Subnet
-    Properties:
-      AvailabilityZone: ap-northeast-1c
-      VpcId: !Ref IacVPC
-      CidrBlock: 10.0.11.0/24
-      Tags:
-        - Key: Name
-          Value: Iac-pri-subnet-RDS-02
-
+# --------------------------------------------- #
 # public subnetのルートテーブルを作成し、VPCに割り当て
+# --------------------------------------------- #
   IacRouteTableEC2:
     Type: AWS::EC2::RouteTable
     DependsOn: AttachGateway
@@ -98,19 +150,11 @@ Resources:
       VpcId: !Ref IacVPC # VPCを割り当て
       Tags:
         - Key: Name
-          Value: Iac-RouteTable-EC2
+          Value: !Sub ${PrefixName}-RouteTable-EC2
 
-# private subnetのルートテーブルを作成し、VPCに割り当て
-  IacRouteTableRDS:
-    Type: AWS::EC2::RouteTable
-    DependsOn: AttachGateway
-    Properties:
-      VpcId: !Ref IacVPC # VPCを割り当て
-      Tags:
-        - Key: Name
-          Value: Iac-RouteTable-RDS
-
+# --------------------------------------------- #
 # ルーティングテーブルの設定
+# --------------------------------------------- #
   IacRouteEC2:
     Type: AWS::EC2::Route
     Properties:
@@ -118,28 +162,18 @@ Resources:
       DestinationCidrBlock: 0.0.0.0/0 # 0.0.0.0/0宛ての通信はIaCGWにルーティング
       GatewayId: !Ref IacIGW
 
+# --------------------------------------------- #
 # public subnetにルートテーブルをサブネットに関連付け
+# --------------------------------------------- #
   IacPublicSubnetRouteTableAsso:
     Type: AWS::EC2::SubnetRouteTableAssociation
     Properties:
       SubnetId: !Ref  IacPublicSubnetEC2
       RouteTableId: !Ref IacRouteTableEC2
 
-# private subnetをルートテーブルをサブネットに関連付け
-  IacPrivateSubnet01RouteTableAsso:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref  IaCPrivateSubnetRDS01
-      RouteTableId: !Ref IacRouteTableRDS
-
-# private subnetをルートテーブルをサブネットに関連付け。
-  IacPrivateSubnet02RouteTableAsso:
-    Type: AWS::EC2::SubnetRouteTableAssociation
-    Properties:
-      SubnetId: !Ref  IaCPrivateSubnetRDS02
-      RouteTableId: !Ref IacRouteTableRDS
-
+# --------------------------------------------- #
 # EC2のセキュリティグループ作成
+# --------------------------------------------- #
   IacSecurityGroupEC2:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -158,25 +192,13 @@ Resources:
           FromPort: 80
           ToPort: 80
 
-# RDAのセキュリティグループ作成
-  IacSecurityGroupRDS:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupName: Iac-SecurityGroup-RDS
-      GroupDescription: Iac-SecurityGroup-RDS
-      VpcId: !Ref IacVPC
-      SecurityGroupIngress: # 通信を許可するプロトコル, セグメント
-        # mysqlのポートのみ許可
-        - IpProtocol: tcp
-          SourceSecurityGroupId: !Ref IacSecurityGroupEC2
-          FromPort: "3306"
-          ToPort: "3306"
-
-# EC2インスタンス作成
+# --------------------------------------------- #
+# EC2作成
+# --------------------------------------------- #
   IacEC2:
     Type: AWS::EC2::Instance
     Properties:
-      ImageId: ami-0f36dcfcc94112ea1 # AWSの既存のイメージを指定
+      ImageId: ami-0f36dcfcc94112ea1 # Amazon Linux2の既存のイメージを指定
       KeyName: !Ref IaCKeyPair
       InstanceType: t2.micro
       NetworkInterfaces: 
@@ -189,8 +211,121 @@ Resources:
       UserData: !Base64 |
         #!/bin/bash
         sudo yum update -y
-        sudo yum install -y git vim
+        sudo yum install -y git vim mysql
         sudo useradd -m my
       Tags:
           - Key: Name
-            Value: Iac-EC2
+            Value: !Sub ${PrefixName}-EC2
+
+
+############## RDS関連で使用するもの定義 ##############
+
+# --------------------------------------------- #
+# RDS用のprivate subnet01を作成
+# --------------------------------------------- #
+  IaCPrivateSubnetRDS01:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1a
+      VpcId: !Ref IacVPC
+      CidrBlock: 10.0.10.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub ${PrefixName}-pri-subnet-RDS-01
+
+# --------------------------------------------- #
+# RDS用のprivate subnet02を作成
+# --------------------------------------------- #
+  IaCPrivateSubnetRDS02:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: ap-northeast-1c
+      VpcId: !Ref IacVPC
+      CidrBlock: 10.0.11.0/24
+      Tags:
+        - Key: Name
+          Value: !Sub ${PrefixName}-pri-subnet-RDS-02
+
+# --------------------------------------------- #
+# private subnetのルートテーブルを作成し、VPCに割り当て
+# --------------------------------------------- #
+  IacRouteTableRDS:
+    Type: AWS::EC2::RouteTable
+    DependsOn: AttachGateway
+    Properties:
+      VpcId: !Ref IacVPC # VPCを割り当て
+      Tags:
+        - Key: Name
+          Value: !Sub ${PrefixName}-RouteTable-RDS
+
+# --------------------------------------------- #
+# private subne01をルートテーブルをサブネットに関連付け
+# --------------------------------------------- #
+  IacPrivateSubnet01RouteTableAsso:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref  IaCPrivateSubnetRDS01
+      RouteTableId: !Ref IacRouteTableRDS
+
+# --------------------------------------------- #
+# private subne02をルートテーブルをサブネットに関連付け
+# --------------------------------------------- #
+  IacPrivateSubnet02RouteTableAsso:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref  IaCPrivateSubnetRDS02
+      RouteTableId: !Ref IacRouteTableRDS
+
+
+# --------------------------------------------- #
+# RDSのセキュリティグループ作成
+# --------------------------------------------- #
+  IacSecurityGroupRDS:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: !Sub ${PrefixName}-SecurityGroup-RDS
+      GroupDescription: !Sub ${PrefixName}-SecurityGroup-RDS
+      VpcId: !Ref IacVPC
+      SecurityGroupIngress: # 通信を許可するプロトコル, セグメント
+        # mysqlのポートのみ許可
+        - IpProtocol: tcp
+          SourceSecurityGroupId: !Ref IacSecurityGroupEC2
+          FromPort: "3306"
+          ToPort: "3306"
+
+# --------------------------------------------- #
+# RDSのsubnetをグルーピング
+# --------------------------------------------- #
+  IacRDSSubnetGroup: 
+    Type: AWS::RDS::DBSubnetGroup
+    Properties: 
+      DBSubnetGroupDescription: subnet group for db
+      SubnetIds: 
+        - !Ref IaCPrivateSubnetRDS01
+        - !Ref IaCPrivateSubnetRDS02
+      # Tags:
+      #   - Key: "CfnStackName"
+      #     Value: !Ref AWS::StackName 
+
+
+# --------------------------------------------- #
+# RDS作成
+# --------------------------------------------- #
+  IacRDS:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete # スタックを削除したらバックアップとしてリソースを保存するが今回は削除する
+    Properties:
+      Engine: MySQL # mysqlを使用する
+      MasterUsername: !Ref DBMasterUserName # データベースのユーザ名
+      MasterUserPassword: !Ref DBPassword #/ !Sub '{{resolve:secretsmanager:${ServiceName}${EnvSuffix}-database-password:SecretString}}'
+      DBName: !Ref DatabaseName #/!Join [ '', [ !Ref DatabaseName, !Ref DatabaseEnvSuffix ] ]
+      DBInstanceIdentifier: !Sub ${PrefixName}-RDS #/!Sub ${ServiceName}${EnvSuffix}-instance-1 # AWS上のRDSの名前
+      DBInstanceClass: !Ref InstanceTypeForDb
+      AllocatedStorage: !Ref DBInstanceStorageSize # 初期ストレージの大きさ。最小の20にする
+      DBSubnetGroupName: !Ref IacRDSSubnetGroup
+      VPCSecurityGroups: 
+        - !Ref IacSecurityGroupRDS
+      BackupRetentionPeriod: !Ref BackupRetentionPeriod # 自動バックアップを無効するため0にする
+      Tags:
+        - Key: Name
+          Value: !Sub ${PrefixName}-RDS
