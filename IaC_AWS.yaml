@@ -48,7 +48,7 @@ Parameters:
 # --------------------------------------------- #
   DatabaseName:
     Type: String
-    Default: mixapp
+    Default: iacdb
   
   InstanceTypeForDb:
     Type: String
@@ -56,7 +56,7 @@ Parameters:
 
   DBMasterUserName:
     Type: String
-    Default: mixappuser
+    Default: iacdbuser
     NoEcho: true
     MinLength: 1
     MaxLength: 16
@@ -64,13 +64,18 @@ Parameters:
     ConstraintDescription: "must begin with a letter and contain only alphanumeric characters."
 
   DBPassword: 
-    Default: "mixappuser01" # とりあえず固定値
+    Default: "iacdbuserr01" # とりあえず固定値
     NoEcho: true
     Type: String
     MinLength: 8
     MaxLength: 41
     AllowedPattern: "[a-zA-Z0-9]*"
     ConstraintDescription: "must contain only alphanumeric characters."
+
+  MySQLMajorVersion:
+    Type: String
+    Default: "5.7"
+    AllowedValues: [ "5.5", "5.6", "5.7", "8.0" ]
 
   DBInstanceStorageSize:
     Type: String
@@ -316,6 +321,7 @@ Resources:
     DeletionPolicy: Delete # スタックを削除したらバックアップとしてリソースを保存するが今回は削除する
     Properties:
       Engine: MySQL # mysqlを使用する
+      EngineVersion: !Ref MySQLMajorVersion # mysqlのバージョンを指定
       MasterUsername: !Ref DBMasterUserName # データベースのユーザ名
       MasterUserPassword: !Ref DBPassword #/ !Sub '{{resolve:secretsmanager:${ServiceName}${EnvSuffix}-database-password:SecretString}}'
       DBName: !Ref DatabaseName #/!Join [ '', [ !Ref DatabaseName, !Ref DatabaseEnvSuffix ] ]
